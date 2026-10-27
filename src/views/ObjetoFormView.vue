@@ -3,6 +3,8 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { supabase } from '../services/supabase'
+import { MODO_PRUEBA } from '../data/modoPrueba'
+import { objetosEstado } from '../data/objetosEstado'
 
 const route = useRoute()
 const router = useRouter()
@@ -30,6 +32,17 @@ function seleccionarFoto(event) {
   fotoNombre.value = event.target.files?.[0]?.name ?? ''
 }
 
+function completarFormulario(data) {
+  formulario.nombre = data.nombre ?? ''
+  formulario.descripcion = data.descripcion ?? ''
+  formulario.especialidad = data.especialidad ?? ''
+  formulario.sector = data.sector ?? ''
+  formulario.estante = data.estante ?? ''
+  formulario.armario = data.armario ?? ''
+  formulario.cajon = data.cajon ?? ''
+  formulario.observaciones = data.observaciones ?? ''
+}
+
 async function cargarObjeto() {
   if (!esEdicion.value) return
 
@@ -39,13 +52,26 @@ async function cargarObjeto() {
 
   const id = route.params.id
 
-  if (!/^\d+$/.test(String(id))) {
-    mensaje.value = 'El identificador del objeto no es válido.'
-    cargando.value = false
-    return
-  }
-
   try {
+    if (MODO_PRUEBA) {
+      const objeto = objetosEstado.value.find(
+        (item) => String(item.id) === String(id)
+      )
+
+      if (!objeto) {
+        mensaje.value = 'No se encontró el objeto que querés modificar.'
+        return
+      }
+
+      completarFormulario(objeto)
+      return
+    }
+
+    if (!/^\d+$/.test(String(id))) {
+      mensaje.value = 'El identificador del objeto no es válido.'
+      return
+    }
+
     const { data, error } = await supabase
       .from('objetos')
       .select(
@@ -61,14 +87,7 @@ async function cargarObjeto() {
       return
     }
 
-    formulario.nombre = data.nombre ?? ''
-    formulario.descripcion = data.descripcion ?? ''
-    formulario.especialidad = data.especialidad ?? ''
-    formulario.sector = data.sector ?? ''
-    formulario.estante = data.estante ?? ''
-    formulario.armario = data.armario ?? ''
-    formulario.cajon = data.cajon ?? ''
-    formulario.observaciones = data.observaciones ?? ''
+    completarFormulario(data)
   } catch (error) {
     console.error('Error al cargar el objeto:', error)
     mensaje.value = 'No se pudieron cargar los datos del objeto.'
@@ -108,7 +127,40 @@ async function enviarFormulario() {
   }
 
   try {
-    let error
+    if (MODO_PRUEBA) {
+      if (esEdicion.value) {
+        const indice = objetosEstado.value.findIndex(
+          (item) => String(item.id) === String(route.params.id)
+        )
+
+        if (indice === -1) {
+          mensaje.value = 'No se encontró el objeto que querés modificar.'
+          return
+        }
+
+        objetosEstado.value[indice] = {
+          ...objetosEstado.value[indice],
+          ...datosObjeto,
+        }
+      } else {
+        const numeros = objetosEstado.value
+          .map((item) => String(item.id).match(/^prueba-(\d+)$/))
+          .filter(Boolean)
+          .map((coincidencia) => Number(coincidencia[1]))
+
+        const siguienteNumero = Math.max(0, ...numeros) + 1
+
+        objetosEstado.value.push({
+          id: `prueba-${siguienteNumero}`,
+          ...datosObjeto,
+          imagen_url: null,
+          creado_en: new Date().toISOString().slice(0, 10),
+        })
+      }
+
+      await router.push('/catalogo')
+      return
+    }
 
     if (esEdicion.value) {
       const id = route.params.id
@@ -125,9 +177,7 @@ async function enviarFormulario() {
         .select('id')
         .maybeSingle()
 
-      error = resultado.error
-
-      if (error) throw error
+      if (resultado.error) throw resultado.error
 
       if (!resultado.data) {
         mensaje.value =
@@ -139,16 +189,15 @@ async function enviarFormulario() {
         .from('objetos')
         .insert(datosObjeto)
 
-      error = resultado.error
-
-      if (error) throw error
+      if (resultado.error) throw resultado.error
     }
 
     await router.push('/catalogo')
   } catch (error) {
     console.error('Error al guardar el objeto:', error)
-    mensaje.value =
-      'No se pudo guardar el objeto. Revisá la conexión y los permisos de Supabase.'
+    mensaje.value = MODO_PRUEBA
+      ? 'No se pudo guardar el objeto de prueba.'
+      : 'No se pudo guardar el objeto. Revisá la conexión y los permisos de Supabase.'
   } finally {
     guardando.value = false
   }
@@ -394,7 +443,11 @@ async function enviarFormulario() {
             <circle cx="8" cy="8" r="6.2"/>
             <path d="M8 7v4M8 4.8h.01"/>
           </svg>
-          <span>Los datos se guardan en la base de datos de BuscaTECH.</span>
+          <span>
+            {{ MODO_PRUEBA
+              ? 'Los datos de prueba son temporales y se reinician al recargar la aplicación.'
+              : 'Los datos se guardan en la base de datos de BuscaTECH.' }}
+          </span>
         </div>
       </aside>
     </div>

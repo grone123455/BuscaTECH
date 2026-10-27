@@ -1,6 +1,12 @@
+
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { supabase } from '../services/supabase'
+import { objetosPrueba } from '../data/objetos'
+import { MODO_PRUEBA } from '../data/modoPrueba'
+import PageHeading from '../components/PageHeading.vue'
+import EstadoMensaje from '../components/EstadoMensaje.vue'
+import { objetosEstado } from '../data/objetosEstado'
 
 const busqueda = ref('')
 const categoriaSeleccionada = ref('Todas')
@@ -33,6 +39,22 @@ async function cargarCatalogo() {
   error.value = ''
 
   try {
+    if (MODO_PRUEBA) {
+      objetos.value = objetosEstado.value
+
+      categorias.value = [
+        'Todas',
+        ...new Set(objetosPrueba.map((objeto) => objeto.especialidad)),
+      ].sort((a, b) => {
+        if (a === 'Todas') return -1
+        if (b === 'Todas') return 1
+        return a.localeCompare(b)
+      })
+
+      categoriaSeleccionada.value = 'Todas'
+      return
+    }
+
     const [respuestaObjetos, respuestaEspecialidades] = await Promise.all([
       supabase
         .from('objetos')
@@ -64,7 +86,8 @@ async function cargarCatalogo() {
     }
   } catch (e) {
     console.error('Error al cargar el catálogo:', e)
-    error.value = 'No se pudo cargar el catálogo. Revisá la conexión e intentá nuevamente.'
+    error.value =
+      'No se pudo cargar el catálogo. Revisá la conexión e intentá nuevamente.'
   } finally {
     cargando.value = false
   }
@@ -80,27 +103,28 @@ onMounted(cargarCatalogo)
 
 <template>
   <section class="catalog-page page-width" aria-labelledby="catalog-title">
-    <div class="page-heading catalog-heading">
-      <div>
-        <div class="breadcrumb">
-          <span>BuscaTECH</span><span aria-hidden="true">/</span><span>Catálogo</span>
-        </div>
-        <p class="eyebrow">
-          INVENTARIO ESCOLAR <span class="eyebrow-divider">/</span> EEST N.º 1
-        </p>
-        <h1 id="catalog-title">Catálogo del pañol</h1>
-        <p class="page-intro">
-          Encontrá herramientas, materiales y equipos por nombre, especialidad y ubicación.
-        </p>
-      </div>
-
-      <RouterLink to="/objetos/nuevo" class="button button-primary catalog-add">
-        <svg viewBox="0 0 20 20" aria-hidden="true">
-          <path d="M10 4v12M4 10h12" />
-        </svg>
-        Registrar objeto
-      </RouterLink>
-    </div>
+    <PageHeading
+      class="catalog-heading"
+      :breadcrumb="[
+        { label: 'BuscaTECH', to: '/' },
+        { label: 'Catálogo' },
+      ]"
+      eyebrow="INVENTARIO ESCOLAR / EEST N.º 1"
+      title="Catálogo del pañol"
+      description="Encontrá herramientas, materiales y equipos por nombre, especialidad y ubicación."
+    >
+      <template #actions>
+        <RouterLink
+          to="/objetos/nuevo"
+          class="button button-primary catalog-add"
+        >
+          <svg viewBox="0 0 20 20" aria-hidden="true">
+            <path d="M10 4v12M4 10h12" />
+          </svg>
+          Registrar objeto
+        </RouterLink>
+      </template>
+    </PageHeading>
 
     <section class="catalog-controls" aria-label="Buscar y filtrar objetos">
       <label class="search-box">
@@ -108,25 +132,36 @@ onMounted(cargarCatalogo)
           <circle cx="8.8" cy="8.8" r="5.8" />
           <path d="m13.2 13.2 4 4" />
         </svg>
+
         <span class="sr-only">Buscar por nombre</span>
+
         <input
           v-model="busqueda"
           type="search"
           placeholder="Buscar una herramienta, material o equipo…"
         />
+
         <button
           v-if="busqueda"
           class="search-clear"
           type="button"
           aria-label="Limpiar búsqueda"
           @click="busqueda = ''"
-        >×</button>
+        >
+          ×
+        </button>
+
         <kbd v-else aria-hidden="true">Buscar</kbd>
       </label>
 
       <div class="filter-row">
         <span class="filter-label">Especialidad</span>
-        <div class="filter-options" role="group" aria-label="Filtrar por especialidad">
+
+        <div
+          class="filter-options"
+          role="group"
+          aria-label="Filtrar por especialidad"
+        >
           <button
             v-for="categoria in categorias"
             :key="categoria"
@@ -135,7 +170,9 @@ onMounted(cargarCatalogo)
             :class="{ 'is-selected': categoriaSeleccionada === categoria }"
             :aria-pressed="categoriaSeleccionada === categoria"
             @click="categoriaSeleccionada = categoria"
-          >{{ categoria }}</button>
+          >
+            {{ categoria }}
+          </button>
         </div>
       </div>
     </section>
@@ -144,27 +181,53 @@ onMounted(cargarCatalogo)
       <div class="results-label">
         <span class="results-dot"></span>
         <span>
-          {{ cargando ? 'Cargando catálogo…' : error ? 'Error de conexión' : 'Catálogo conectado' }}
+          {{
+            cargando
+              ? 'Cargando catálogo…'
+              : error
+                ? 'Error de conexión'
+                : MODO_PRUEBA
+                  ? 'Modo de prueba'
+                  : 'Catálogo conectado'
+          }}
         </span>
       </div>
+
       <span class="results-count">
         {{ cargando ? '…' : `${objetosFiltrados.length} objetos` }}
       </span>
     </div>
 
-    <p v-if="error" class="empty-copy" role="alert">{{ error }}</p>
+    <EstadoMensaje
+      v-if="error"
+      tipo="error"
+      titulo="Error al cargar el catálogo"
+      :mensaje="error"
+    />
 
-    <div v-else-if="cargando" class="catalog-empty" aria-live="polite">
-      <h2>Cargando catálogo</h2>
-      <p class="empty-copy">Estamos consultando los datos del pañol.</p>
-    </div>
+    <EstadoMensaje
+      v-else-if="cargando"
+      tipo="info"
+      titulo="Cargando catálogo"
+      mensaje="Estamos preparando la información del pañol."
+    />
 
-    <section v-else-if="objetosFiltrados.length" class="catalog-grid" aria-label="Objetos del catálogo">
-      <article v-for="objeto in objetosFiltrados" :key="objeto.id" class="object-card">
+    <section
+      v-else-if="objetosFiltrados.length"
+      class="catalog-grid"
+      aria-label="Objetos del catálogo"
+    >
+      <article
+        v-for="objeto in objetosFiltrados"
+        :key="objeto.id"
+        class="object-card"
+      >
         <div class="object-card-content">
           <p class="eyebrow">{{ objeto.especialidad }}</p>
           <h2>{{ objeto.nombre }}</h2>
+
           <p v-if="objeto.descripcion">{{ objeto.descripcion }}</p>
+
           <p class="object-location">
             <strong>Ubicación:</strong>
             {{
@@ -173,6 +236,7 @@ onMounted(cargarCatalogo)
                 .join(' · ') || 'Sin ubicación especificada'
             }}
           </p>
+
           <RouterLink :to="`/objetos/${objeto.id}`" class="text-button">
             Ver detalle <span aria-hidden="true">→</span>
           </RouterLink>
@@ -190,28 +254,43 @@ onMounted(cargarCatalogo)
         <div class="empty-screw empty-screw-one"></div>
         <div class="empty-screw empty-screw-two"></div>
       </div>
-      <p class="eyebrow">{{ tieneFiltros ? 'SIN COINCIDENCIAS' : 'CATÁLOGO VACÍO' }}</p>
+
+      <p class="eyebrow">
+        {{ tieneFiltros ? 'SIN COINCIDENCIAS' : 'CATÁLOGO VACÍO' }}
+      </p>
+
       <h2>
-        {{ tieneFiltros ? 'No hay resultados para esta búsqueda' : 'El pañol empieza acá' }}
+        {{
+          tieneFiltros
+            ? 'No hay resultados para esta búsqueda'
+            : 'El pañol empieza acá'
+        }}
       </h2>
+
       <p class="empty-copy">
         {{
           tieneFiltros
             ? 'No hay objetos que coincidan con esos criterios. Probá otra búsqueda o limpiá los filtros.'
-            : 'La conexión funciona, pero todavía no hay objetos cargados en la base de datos.'
+            : 'Todavía no hay objetos para mostrar.'
         }}
       </p>
+
       <button
         v-if="tieneFiltros"
         type="button"
         class="text-button"
         @click="limpiarFiltros"
-      >Limpiar búsqueda y filtros <span aria-hidden="true">→</span></button>
+      >
+        Limpiar búsqueda y filtros <span aria-hidden="true">→</span>
+      </button>
+
       <RouterLink
         v-else
         to="/objetos/nuevo"
         class="button button-secondary empty-action"
-      >Registrar el primer objeto <span aria-hidden="true">→</span></RouterLink>
+      >
+        Registrar el primer objeto <span aria-hidden="true">→</span>
+      </RouterLink>
     </section>
 
     <div class="catalog-footnote">
@@ -219,7 +298,14 @@ onMounted(cargarCatalogo)
         <circle cx="10" cy="10" r="7.2" />
         <path d="M10 9v4M10 6.4h.01" />
       </svg>
-      <p>Los datos se consultan directamente desde la base de datos de BuscaTECH.</p>
+
+      <p>
+        {{
+          MODO_PRUEBA
+            ? 'Se muestran datos ficticios locales. No se guardan en Supabase.'
+            : 'Los datos se consultan directamente desde la base de datos de BuscaTECH.'
+        }}
+      </p>
     </div>
   </section>
 </template>

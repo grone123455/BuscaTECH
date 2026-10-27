@@ -1,4 +1,3 @@
-
 <script setup>
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
@@ -28,6 +27,28 @@ async function iniciarSesion() {
       return
     }
 
+    const usuario = data.user
+    const metadatos = usuario.user_metadata ?? {}
+
+    const { error: errorPerfil } = await supabase
+      .from('perfiles')
+      .upsert(
+        {
+          id: usuario.id,
+          nombre: metadatos.nombre ?? '',
+          apellido: metadatos.apellido ?? '',
+          tipo_integrante: metadatos.tipo_integrante ?? 'otro',
+        },
+        { onConflict: 'id' },
+      )
+
+    if (errorPerfil) {
+      console.error('Error al guardar el perfil:', errorPerfil)
+      mensaje.value =
+        'Iniciaste sesión, pero no se pudieron guardar tus datos de perfil.'
+      return
+    }
+
     await router.push('/catalogo')
   } catch (error) {
     console.error('Error al iniciar sesión:', error)
@@ -44,8 +65,8 @@ async function iniciarSesion() {
     <div class="auth-aside">
       <span class="auth-aside-mark" aria-hidden="true">
         <svg viewBox="0 0 32 32">
-          <path d="M7 24V8h9a6 6 0 0 1 0 12H7m9 0 8 4"/>
-          <path d="M22 8h4v4"/>
+          <path d="M7 24V8h9a6 6 0 0 1 0 12H7m9 0 8 4" />
+          <path d="M22 8h4v4" />
         </svg>
       </span>
 

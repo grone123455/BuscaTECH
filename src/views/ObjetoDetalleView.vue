@@ -3,6 +3,9 @@
 import { onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { supabase } from '../services/supabase'
+import { objetosEstado } from '../data/objetosEstado'
+import { MODO_PRUEBA } from '../data/modoPrueba'
+import PageHeading from '../components/PageHeading.vue'
 
 const route = useRoute()
 
@@ -15,9 +18,24 @@ async function cargarObjeto() {
   error.value = ''
   objeto.value = null
 
-  const id = route.params.id
+  const id = String(route.params.id)
 
-  if (!id || !/^\d+$/.test(String(id))) {
+  if (MODO_PRUEBA) {
+    const encontrado = objetosEstado.value.find(
+      (item) => String(item.id) === id,
+    )
+
+    if (!encontrado) {
+      error.value = 'No existe un objeto de prueba con ese identificador.'
+    } else {
+      objeto.value = encontrado
+    }
+
+    cargando.value = false
+    return
+  }
+
+  if (!id || !/^\d+$/.test(id)) {
     error.value = 'El identificador del objeto no es válido.'
     cargando.value = false
     return
@@ -27,7 +45,7 @@ async function cargarObjeto() {
     const { data, error: errorConsulta } = await supabase
       .from('objetos')
       .select(
-        'id, nombre, descripcion, especialidad, sector, estante, armario, cajon, observaciones, imagen_url, creado_en'
+        'id, nombre, descripcion, especialidad, sector, estante, armario, cajon, observaciones, imagen_url, creado_en',
       )
       .eq('id', id)
       .maybeSingle()
@@ -42,33 +60,27 @@ async function cargarObjeto() {
     objeto.value = data
   } catch (e) {
     console.error('Error al cargar el objeto:', e)
-    error.value = 'No se pudo cargar el objeto. Revisá la conexión e intentá nuevamente.'
+    error.value =
+      'No se pudo cargar el objeto. Revisá la conexión e intentá nuevamente.'
   } finally {
     cargando.value = false
   }
 }
 
 onMounted(cargarObjeto)
-
 watch(() => route.params.id, cargarObjeto)
 </script>
 
 <template>
-  <section class="detail-page page-width" aria-labelledby="detail-title">
-    <div class="breadcrumb">
-      <RouterLink to="/catalogo">Catálogo</RouterLink>
-      <span aria-hidden="true">/</span>
-      <span>Detalle</span>
-    </div>
-
+  <section class="detail-page page-width">
     <div v-if="cargando" class="detail-empty-card" aria-live="polite">
-      <h1 id="detail-title">Cargando objeto…</h1>
-      <p>Estamos consultando la información del pañol.</p>
+      <h1>Cargando objeto…</h1>
+      <p>Estamos preparando la información del pañol.</p>
     </div>
 
     <div v-else-if="error" class="detail-empty-card" role="alert">
       <p class="eyebrow">FICHA DEL PAÑOL</p>
-      <h1 id="detail-title">No se pudo mostrar el objeto</h1>
+      <h1>No se pudo mostrar el objeto</h1>
       <p>{{ error }}</p>
 
       <div class="detail-actions">
@@ -79,23 +91,26 @@ watch(() => route.params.id, cargarObjeto)
     </div>
 
     <template v-else-if="objeto">
-      <header class="page-heading form-intro">
-        <div>
-          <p class="eyebrow">
-            FICHA DEL PAÑOL <span class="eyebrow-divider">/</span>
-            {{ objeto.id }}
-          </p>
-          <h1 id="detail-title">{{ objeto.nombre }}</h1>
-          <p class="page-intro">{{ objeto.especialidad }}</p>
-        </div>
-
-        <RouterLink
-          :to="`/objetos/${objeto.id}/editar`"
-          class="button button-primary"
-        >
-          Modificar objeto
-        </RouterLink>
-      </header>
+      <PageHeading
+        class="form-intro"
+        :breadcrumb="[
+          { label: 'Catálogo', to: '/catalogo' },
+          { label: 'Detalle' },
+        ]"
+        :eyebrow="`FICHA DEL PAÑOL / ${objeto.id}`"
+        :title="objeto.nombre"
+        :description="objeto.especialidad"
+      >
+        <template #actions>
+          <RouterLink
+            v-if="!MODO_PRUEBA"
+            :to="`/objetos/${objeto.id}/editar`"
+            class="button button-primary"
+          >
+            Modificar objeto
+          </RouterLink>
+        </template>
+      </PageHeading>
 
       <div class="form-layout">
         <article class="form-card">
