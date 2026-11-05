@@ -12,7 +12,7 @@ defineProps({
   tipo: {
     type: String,
     default: 'info',
-    validator: (valor) => ['info', 'error'].includes(valor),
+    validator: (valor) => ['info', 'error', 'success'].includes(valor),
   },
 })
 </script>

@@ -1,17 +1,20 @@
 
 <script setup>
 import { onMounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { supabase } from '../services/supabase'
 import { objetosEstado } from '../data/objetosEstado'
 import { MODO_PRUEBA } from '../data/modoPrueba'
 import PageHeading from '../components/PageHeading.vue'
 
 const route = useRoute()
+const router = useRouter()
 
 const objeto = ref(null)
 const cargando = ref(true)
 const error = ref('')
+const eliminando = ref(false)
+const errorEliminacion = ref('')
 
 async function cargarObjeto() {
   cargando.value = true
@@ -67,6 +70,57 @@ async function cargarObjeto() {
   }
 }
 
+async function eliminarObjeto() {
+  const confirmar = window.confirm(
+    `¿Estás seguro de que querés eliminar "${objeto.value.nombre}"? Esta acción no se puede deshacer.`,
+  )
+
+  if (!confirmar) return
+
+  eliminando.value = true
+  errorEliminacion.value = ''
+
+  try {
+    if (MODO_PRUEBA) {
+      const indice = objetosEstado.value.findIndex(
+        (item) => String(item.id) === String(objeto.value.id),
+      )
+
+      if (indice === -1) {
+        throw new Error('No se encontró el objeto.')
+      }
+
+      objetosEstado.value.splice(indice, 1)
+    } else {
+      const { data, error: errorEliminar } = await supabase
+        .from('objetos')
+        .delete()
+        .eq('id', objeto.value.id)
+        .select('id')
+        .maybeSingle()
+
+      if (errorEliminar) throw errorEliminar
+
+      if (!data) {
+        throw new Error('No se pudo encontrar el objeto para eliminarlo.')
+      }
+    }
+
+    await router.push({
+      path: '/catalogo',
+      query: {
+        mensaje: 'Objeto eliminado correctamente.',
+      },
+    })
+  } catch (e) {
+    console.error('Error al eliminar el objeto:', e)
+    errorEliminacion.value =
+      'No se pudo eliminar el objeto. Revisá los permisos y la conexión e intentá nuevamente.'
+  } finally {
+    eliminando.value = false
+  }
+}
+
 onMounted(cargarObjeto)
 watch(() => route.params.id, cargarObjeto)
 </script>
@@ -109,8 +163,22 @@ watch(() => route.params.id, cargarObjeto)
           >
             Modificar objeto
           </RouterLink>
+
+          <button
+            v-if="!MODO_PRUEBA"
+            type="button"
+            class="button button-secondary"
+            :disabled="eliminando"
+            @click="eliminarObjeto"
+          >
+            {{ eliminando ? 'Eliminando...' : 'Eliminar objeto' }}
+          </button>
         </template>
       </PageHeading>
+
+      <p v-if="errorEliminacion" class="detail-error" role="alert">
+        {{ errorEliminacion }}
+      </p>
 
       <div class="form-layout">
         <article class="form-card">

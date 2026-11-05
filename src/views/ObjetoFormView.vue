@@ -8,6 +8,7 @@ import { objetosEstado } from '../data/objetosEstado'
 
 const route = useRoute()
 const router = useRouter()
+const mensajeExito = computed(() => router.currentRoute.value.query.mensaje || '')
 
 const esEdicion = computed(() => Boolean(route.params.id))
 
@@ -192,7 +193,14 @@ async function enviarFormulario() {
       if (resultado.error) throw resultado.error
     }
 
-    await router.push('/catalogo')
+    await router.push({
+  path: '/catalogo',
+  query: {
+    mensaje: esEdicion.value
+      ? 'Objeto actualizado correctamente.'
+      : 'Objeto guardado correctamente.',
+  },
+    })
   } catch (error) {
     console.error('Error al guardar el objeto:', error)
     mensaje.value = MODO_PRUEBA
