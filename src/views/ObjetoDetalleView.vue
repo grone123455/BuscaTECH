@@ -1,256 +1,231 @@
 
 <script setup>
-import { onMounted, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { supabase } from '../services/supabase'
-import { objetosEstado } from '../data/objetosEstado'
-import { MODO_PRUEBA } from '../data/modoPrueba'
 import PageHeading from '../components/PageHeading.vue'
+import EstadoMensaje from '../components/EstadoMensaje.vue'
 
-const route = useRoute()
 const router = useRouter()
 
-const objeto = ref(null)
+const mensajeExito = computed(
+  () => router.currentRoute.value.query.mensaje || ''
+)
+
+const objetos = ref([])
+const categorias = ref(['Todas'])
+const categoriaSeleccionada = ref('Todas')
+const busqueda = ref('')
 const cargando = ref(true)
 const error = ref('')
-const eliminando = ref(false)
-const errorEliminacion = ref('')
 
-async function cargarObjeto() {
+const objetosFiltrados = computed(() => {
+  return objetos.value.filter((objeto) => {
+    const coincideCategoria =
+      categoriaSeleccionada.value === 'Todas' ||
+      objeto.especialidad === categoriaSeleccionada.value
+
+    const texto = busqueda.value.toLowerCase().trim()
+
+    const coincideBusqueda =
+      objeto.nombre.toLowerCase().includes(texto) ||
+      (objeto.descripcion || '').toLowerCase().includes(texto) ||
+      (objeto.especialidad || '').toLowerCase().includes(texto) ||
+      (objeto.sector || '').toLowerCase().includes(texto)
+
+    return coincideCategoria && coincideBusqueda
+  })
+})
+
+async function cargarCatalogo() {
   cargando.value = true
   error.value = ''
-  objeto.value = null
-
-  const id = String(route.params.id)
-
-  if (MODO_PRUEBA) {
-    const encontrado = objetosEstado.value.find(
-      (item) => String(item.id) === id,
-    )
-
-    if (!encontrado) {
-      error.value = 'No existe un objeto de prueba con ese identificador.'
-    } else {
-      objeto.value = encontrado
-    }
-
-    cargando.value = false
-    return
-  }
-
-  if (!id || !/^\d+$/.test(id)) {
-    error.value = 'El identificador del objeto no es válido.'
-    cargando.value = false
-    return
-  }
 
   try {
-    const { data, error: errorConsulta } = await supabase
+    const { data, error: errorObjetos } = await supabase
       .from('objetos')
       .select(
-        'id, nombre, descripcion, especialidad, sector, estante, armario, cajon, observaciones, imagen_url, creado_en',
+        'id, nombre, descripcion, especialidad, sector, estante, armario, cajon, observaciones, imagen_url, creado_en'
       )
-      .eq('id', id)
-      .maybeSingle()
+      .order('nombre', { ascending: true })
 
-    if (errorConsulta) throw errorConsulta
-
-    if (!data) {
-      error.value = 'No existe un objeto con ese identificador.'
-      return
+    if (errorObjetos) {
+      throw errorObjetos
     }
 
-    objeto.value = data
-  } catch (e) {
-    console.error('Error al cargar el objeto:', e)
-    error.value =
-      'No se pudo cargar el objeto. Revisá la conexión e intentá nuevamente.'
+    objetos.value = data ?? []
+
+    const especialidades = [
+      ...new Set(
+        objetos.value
+          .map((objeto) => objeto.especialidad)
+          .filter(Boolean)
+      )
+    ]
+
+    categorias.value = [
+      'Todas',
+      ...especialidades.sort((a, b) => a.localeCompare(b))
+    ]
+
+    if (!categorias.value.includes(categoriaSeleccionada.value)) {
+      categoriaSeleccionada.value = 'Todas'
+    }
+  } catch (err) {
+    console.error('Error al cargar el catálogo:', err)
+    error.value = 'No se pudo cargar el catálogo. Intentá nuevamente.'
   } finally {
     cargando.value = false
   }
 }
 
-async function eliminarObjeto() {
-  const confirmar = window.confirm(
-    `¿Estás seguro de que querés eliminar "${objeto.value.nombre}"? Esta acción no se puede deshacer.`,
-  )
-
-  if (!confirmar) return
-
-  eliminando.value = true
-  errorEliminacion.value = ''
-
-  try {
-    if (MODO_PRUEBA) {
-      const indice = objetosEstado.value.findIndex(
-        (item) => String(item.id) === String(objeto.value.id),
-      )
-
-      if (indice === -1) {
-        throw new Error('No se encontró el objeto.')
-      }
-
-      objetosEstado.value.splice(indice, 1)
-    } else {
-      const { data, error: errorEliminar } = await supabase
-        .from('objetos')
-        .delete()
-        .eq('id', objeto.value.id)
-        .select('id')
-        .maybeSingle()
-
-      if (errorEliminar) throw errorEliminar
-
-      if (!data) {
-        throw new Error('No se pudo encontrar el objeto para eliminarlo.')
-      }
-    }
-
-    await router.push({
-      path: '/catalogo',
-      query: {
-        mensaje: 'Objeto eliminado correctamente.',
-      },
-    })
-  } catch (e) {
-    console.error('Error al eliminar el objeto:', e)
-    errorEliminacion.value =
-      'No se pudo eliminar el objeto. Revisá los permisos y la conexión e intentá nuevamente.'
-  } finally {
-    eliminando.value = false
-  }
+function verObjeto(id) {
+  router.push(`/objetos/${id}`)
 }
 
-onMounted(cargarObjeto)
-watch(() => route.params.id, cargarObjeto)
+function agregarObjeto() {
+  router.push('/objetos/nuevo')
+}
+
+onMounted(cargarCatalogo)
 </script>
 
 <template>
-  <section class="detail-page page-width">
-    <div v-if="cargando" class="detail-empty-card" aria-live="polite">
-      <h1>Cargando objeto…</h1>
-      <p>Estamos preparando la información del pañol.</p>
+  <main class="catalog-page page-width">
+    <div class="breadcrumb">
+      <span>BuscaTECH</span>
+      <span>/</span>
+      <span>Catálogo</span>
     </div>
 
-    <div v-else-if="error" class="detail-empty-card" role="alert">
-      <p class="eyebrow">FICHA DEL PAÑOL</p>
-      <h1>No se pudo mostrar el objeto</h1>
-      <p>{{ error }}</p>
+    <PageHeading
+      eyebrow="INVENTARIO ESCOLAR / EEST N.º 1"
+      title="Catálogo del pañol"
+      description="Buscá herramientas, materiales y equipos y consultá dónde se encuentran."
+    />
 
-      <div class="detail-actions">
-        <RouterLink to="/catalogo" class="button button-secondary">
-          Volver al catálogo
-        </RouterLink>
+    <EstadoMensaje
+      v-if="mensajeExito"
+      tipo="success"
+      titulo="Operación realizada"
+      :mensaje="mensajeExito"
+    />
+
+    <section class="catalog-controls">
+      <div class="search-box">
+        <input
+          v-model="busqueda"
+          type="search"
+          placeholder="Buscar herramientas, materiales..."
+          aria-label="Buscar objetos"
+        />
       </div>
+
+      <button class="button button-primary catalog-add" @click="agregarObjeto">
+        <span>+</span>
+        Agregar objeto
+      </button>
+    </section>
+
+    <section class="filter-row">
+      <span class="filter-label">Especialidad</span>
+
+      <div class="filter-options">
+        <button
+          v-for="categoria in categorias"
+          :key="categoria"
+          class="filter-chip"
+          :class="{ 'is-selected': categoriaSeleccionada === categoria }"
+          @click="categoriaSeleccionada = categoria"
+        >
+          {{ categoria }}
+        </button>
+      </div>
+    </section>
+
+    <div class="catalog-results-bar">
+      <span class="results-label">
+        <span class="results-dot"></span>
+        Resultados
+      </span>
+
+      <span class="results-count">
+        {{ objetosFiltrados.length }}
+        {{ objetosFiltrados.length === 1 ? 'objeto' : 'objetos' }}
+      </span>
     </div>
 
-    <template v-else-if="objeto">
-      <PageHeading
-        class="form-intro"
-        :breadcrumb="[
-          { label: 'Catálogo', to: '/catalogo' },
-          { label: 'Detalle' },
-        ]"
-        :eyebrow="`FICHA DEL PAÑOL / ${objeto.id}`"
-        :title="objeto.nombre"
-        :description="objeto.especialidad"
+    <EstadoMensaje
+      v-if="cargando"
+      tipo="info"
+      titulo="Cargando catálogo"
+      mensaje="Esperá un momento mientras cargamos los objetos."
+    />
+
+    <EstadoMensaje
+      v-else-if="error"
+      tipo="error"
+      titulo="No se pudo cargar el catálogo"
+      :mensaje="error"
+    />
+
+    <section v-else-if="objetosFiltrados.length" class="catalog-grid">
+      <article
+        v-for="objeto in objetosFiltrados"
+        :key="objeto.id"
+        class="catalog-card"
+        @click="verObjeto(objeto.id)"
       >
-        <template #actions>
-          <RouterLink
-            v-if="!MODO_PRUEBA"
-            :to="`/objetos/${objeto.id}/editar`"
-            class="button button-primary"
-          >
-            Modificar objeto
-          </RouterLink>
+        <img
+          v-if="objeto.imagen_url"
+          :src="objeto.imagen_url"
+          :alt="`Fotografía de ${objeto.nombre}`"
+          style="width: 100%; aspect-ratio: 16 / 9; object-fit: cover; display: block;"
+        />
 
-          <button
-            v-if="!MODO_PRUEBA"
-            type="button"
-            class="button button-secondary"
-            :disabled="eliminando"
-            @click="eliminarObjeto"
-          >
-            {{ eliminando ? 'Eliminando...' : 'Eliminar objeto' }}
-          </button>
-        </template>
-      </PageHeading>
+        <div class="catalog-card-content">
+          <span class="catalog-card-category">
+            {{ objeto.especialidad }}
+          </span>
 
-      <p v-if="errorEliminacion" class="detail-error" role="alert">
-        {{ errorEliminacion }}
+          <h2>{{ objeto.nombre }}</h2>
+
+          <p v-if="objeto.descripcion">
+            {{ objeto.descripcion }}
+          </p>
+
+          <p class="catalog-card-location">
+            Sector: {{ objeto.sector || 'Sin especificar' }}
+            · Estante: {{ objeto.estante || 'Sin especificar' }}
+            · Armario: {{ objeto.armario || 'Sin especificar' }}
+            <span v-if="objeto.cajon">
+              · Cajón: {{ objeto.cajon }}
+            </span>
+          </p>
+        </div>
+      </article>
+    </section>
+
+    <section v-else class="catalog-empty">
+      <div class="empty-illustration">
+        <div class="empty-grid"></div>
+        <div class="empty-shelf"></div>
+        <div class="empty-tool"></div>
+      </div>
+
+      <h2>No hay objetos disponibles</h2>
+
+      <p class="empty-copy">
+        No se encontraron objetos con los filtros seleccionados.
       </p>
 
-      <div class="form-layout">
-        <article class="form-card">
-          <h2 class="form-section-title">
-            <span>01</span> Información del objeto
-          </h2>
+      <button class="text-button" @click="agregarObjeto">
+        Agregar el primer objeto
+      </button>
+    </section>
 
-          <div class="form-grid">
-            <div class="form-field is-wide">
-              <label>Descripción</label>
-              <p>{{ objeto.descripcion || 'Sin descripción' }}</p>
-            </div>
-
-            <div class="form-field">
-              <label>Especialidad</label>
-              <p>{{ objeto.especialidad }}</p>
-            </div>
-          </div>
-
-          <h2 class="form-section-title form-section-spaced">
-            <span>02</span> Ubicación en el pañol
-          </h2>
-
-          <div class="form-grid">
-            <div class="form-field">
-              <label>Sector</label>
-              <p>{{ objeto.sector || 'No especificado' }}</p>
-            </div>
-
-            <div class="form-field">
-              <label>Estante</label>
-              <p>{{ objeto.estante || 'No especificado' }}</p>
-            </div>
-
-            <div class="form-field">
-              <label>Armario</label>
-              <p>{{ objeto.armario || 'No especificado' }}</p>
-            </div>
-
-            <div class="form-field">
-              <label>Cajón</label>
-              <p>{{ objeto.cajon || 'No especificado' }}</p>
-            </div>
-          </div>
-
-          <h2 class="form-section-title form-section-spaced">
-            <span>03</span> Observaciones
-          </h2>
-
-          <p>{{ objeto.observaciones || 'Sin observaciones' }}</p>
-
-          <div class="form-actions">
-            <RouterLink to="/catalogo" class="button button-secondary">
-              Volver al catálogo
-            </RouterLink>
-          </div>
-        </article>
-
-        <aside class="form-aside">
-          <p class="aside-label">RESUMEN DE LA FICHA</p>
-          <p><strong>Identificador:</strong> {{ objeto.id }}</p>
-          <p><strong>Especialidad:</strong> {{ objeto.especialidad }}</p>
-          <p>
-            <strong>Ubicación:</strong>
-            {{
-              [objeto.sector, objeto.estante, objeto.armario, objeto.cajon]
-                .filter(Boolean)
-                .join(' · ') || 'No especificada'
-            }}
-          </p>
-        </aside>
-      </div>
-    </template>
-  </section>
+    <p class="catalog-footnote">
+      BuscaTECH · Inventario escolar
+    </p>
+  </main>
 </template>

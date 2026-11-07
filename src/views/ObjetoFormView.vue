@@ -6,10 +6,13 @@ import { supabase } from '../services/supabase'
 import { MODO_PRUEBA } from '../data/modoPrueba'
 import { objetosEstado } from '../data/objetosEstado'
 
+const BUCKET_FOTOGRAFIAS = 'fotografias-objetos'
+const TAMANO_MAXIMO = 5 * 1024 * 1024
+
 const route = useRoute()
 const router = useRouter()
-const mensajeExito = computed(() => router.currentRoute.value.query.mensaje || '')
 
+const mensajeExito = computed(() => router.currentRoute.value.query.mensaje || '')
 const esEdicion = computed(() => Boolean(route.params.id))
 
 const formulario = reactive({
@@ -24,13 +27,45 @@ const formulario = reactive({
 })
 
 const fotoNombre = ref('')
+const fotoSeleccionada = ref(null)
+const imagenUrlActual = ref('')
+
 const errores = ref([])
 const mensaje = ref('')
 const guardando = ref(false)
 const cargando = ref(false)
 
 function seleccionarFoto(event) {
-  fotoNombre.value = event.target.files?.[0]?.name ?? ''
+  const archivo = event.target.files?.[0] ?? null
+
+  errores.value = []
+
+  if (!archivo) {
+    fotoSeleccionada.value = null
+    fotoNombre.value = ''
+    return
+  }
+
+  const tiposPermitidos = [
+    'image/jpeg',
+    'image/png',
+    'image/webp',
+  ]
+
+  if (!tiposPermitidos.includes(archivo.type)) {
+    errores.value.push('La fotografía debe ser JPG, PNG o WEBP.')
+    event.target.value = ''
+    return
+  }
+
+  if (archivo.size > TAMANO_MAXIMO) {
+    errores.value.push('La fotografía no puede superar los 5 MB.')
+    event.target.value = ''
+    return
+  }
+
+  fotoSeleccionada.value = archivo
+  fotoNombre.value = archivo.name
 }
 
 function completarFormulario(data) {
@@ -42,6 +77,67 @@ function completarFormulario(data) {
   formulario.armario = data.armario ?? ''
   formulario.cajon = data.cajon ?? ''
   formulario.observaciones = data.observaciones ?? ''
+
+  imagenUrlActual.value = data.imagen_url ?? ''
+}
+
+function obtenerRutaImagen(url) {
+  if (!url) return null
+
+  const marcador = `/storage/v1/object/public/${BUCKET_FOTOGRAFIAS}/`
+  const posicion = url.indexOf(marcador)
+
+  if (posicion === -1) return null
+
+  return decodeURIComponent(
+    url.substring(posicion + marcador.length).split('?')[0]
+  )
+}
+
+async function subirFotografia() {
+  const archivo = fotoSeleccionada.value
+
+  if (!archivo) return null
+
+  const extensiones = {
+    'image/jpeg': 'jpg',
+    'image/png': 'png',
+    'image/webp': 'webp',
+  }
+
+  const extension = extensiones[archivo.type]
+  const nombreArchivo = `${crypto.randomUUID()}.${extension}`
+
+  const { error } = await supabase.storage
+    .from(BUCKET_FOTOGRAFIAS)
+    .upload(nombreArchivo, archivo, {
+      cacheControl: '3600',
+      upsert: false,
+      contentType: archivo.type,
+    })
+
+  if (error) throw error
+
+  const { data } = supabase.storage
+    .from(BUCKET_FOTOGRAFIAS)
+    .getPublicUrl(nombreArchivo)
+
+  return {
+    url: data.publicUrl,
+    ruta: nombreArchivo,
+  }
+}
+
+async function eliminarFotografia(ruta) {
+  if (!ruta) return
+
+  const { error } = await supabase.storage
+    .from(BUCKET_FOTOGRAFIAS)
+    .remove([ruta])
+
+  if (error) {
+    console.warn('No se pudo eliminar la fotografía anterior:', error)
+  }
 }
 
 async function cargarObjeto() {
@@ -76,7 +172,7 @@ async function cargarObjeto() {
     const { data, error } = await supabase
       .from('objetos')
       .select(
-        'id, nombre, descripcion, especialidad, sector, estante, armario, cajon, observaciones'
+        'id, nombre, descripcion, especialidad, sector, estante, armario, cajon, observaciones, imagen_url'
       )
       .eq('id', id)
       .maybeSingle()
@@ -127,6 +223,8 @@ async function enviarFormulario() {
     observaciones: formulario.observaciones.trim() || null,
   }
 
+  let fotografiaNueva = null
+
   try {
     if (MODO_PRUEBA) {
       if (esEdicion.value) {
@@ -163,6 +261,11 @@ async function enviarFormulario() {
       return
     }
 
+    // Subir la fotografía si se seleccionó una nueva.
+    if (fotoSeleccionada.value) {
+      fotografiaNueva = await subirFotografia()
+    }
+
     if (esEdicion.value) {
       const id = route.params.id
 
@@ -171,9 +274,17 @@ async function enviarFormulario() {
         return
       }
 
+      const datosActualizacion = { ...datosObjeto }
+
+      // Si hay una fotografía nueva, actualizar su URL.
+      // Si no, se conserva la fotografía anterior.
+      if (fotografiaNueva) {
+        datosActualizacion.imagen_url = fotografiaNueva.url
+      }
+
       const resultado = await supabase
         .from('objetos')
-        .update(datosObjeto)
+        .update(datosActualizacion)
         .eq('id', id)
         .select('id')
         .maybeSingle()
@@ -185,7 +296,20 @@ async function enviarFormulario() {
           'No se pudo modificar el objeto. Verificá que exista y que tengas permiso para editarlo.'
         return
       }
+
+      // Eliminar la fotografía anterior después de guardar la nueva.
+      if (fotografiaNueva && imagenUrlActual.value) {
+        const rutaAnterior = obtenerRutaImagen(imagenUrlActual.value)
+
+        if (rutaAnterior) {
+          await eliminarFotografia(rutaAnterior)
+        }
+      }
     } else {
+      if (fotografiaNueva) {
+        datosObjeto.imagen_url = fotografiaNueva.url
+      }
+
       const resultado = await supabase
         .from('objetos')
         .insert(datosObjeto)
@@ -194,18 +318,23 @@ async function enviarFormulario() {
     }
 
     await router.push({
-  path: '/catalogo',
-  query: {
-    mensaje: esEdicion.value
-      ? 'Objeto actualizado correctamente.'
-      : 'Objeto guardado correctamente.',
-  },
+      path: '/catalogo',
+      query: {
+        mensaje: esEdicion.value
+          ? 'Objeto actualizado correctamente.'
+          : 'Objeto guardado correctamente.',
+      },
     })
   } catch (error) {
     console.error('Error al guardar el objeto:', error)
-    mensaje.value = MODO_PRUEBA
-      ? 'No se pudo guardar el objeto de prueba.'
-      : 'No se pudo guardar el objeto. Revisá la conexión y los permisos de Supabase.'
+
+    // Si la subida funcionó pero el guardado falló,
+    // eliminar el archivo nuevo para evitar archivos innecesarios.
+    if (fotografiaNueva) {
+      await eliminarFotografia(fotografiaNueva.ruta)
+    }
+
+    mensaje.value = 'No se pudo guardar el objeto. Revisá la conexión y los permisos de Supabase.'
   } finally {
     guardando.value = false
   }
@@ -256,6 +385,7 @@ async function enviarFormulario() {
         <p v-if="errores.length" class="form-alert" role="alert">
           {{ errores.join(' ') }}
         </p>
+
         <p v-if="mensaje" class="form-feedback" role="status">
           {{ mensaje }}
         </p>
@@ -369,24 +499,31 @@ async function enviarFormulario() {
             <label for="object-photo">
               Fotografía <span class="field-hint">(opcional)</span>
             </label>
+
             <label class="upload-control" for="object-photo">
               <span class="upload-icon" aria-hidden="true">
                 <svg viewBox="0 0 20 20">
                   <path d="M10 13V3.5m0 0L6.5 7M10 3.5 13.5 7M4 12v4.5h12V12"/>
                 </svg>
               </span>
+
               <span class="upload-copy">
                 <strong>{{ fotoNombre || 'Elegir una imagen' }}</strong>
-                <small>JPG, PNG o WEBP · La imagen no se sube en esta etapa</small>
+                <small>JPG, PNG o WEBP · Máximo 5 MB</small>
               </span>
+
               <input
                 id="object-photo"
                 type="file"
-                accept="image/*"
+                accept="image/jpeg,image/png,image/webp"
                 :disabled="guardando"
                 @change="seleccionarFoto"
               />
             </label>
+
+            <p v-if="imagenUrlActual && !fotoSeleccionada" class="field-hint">
+              Este objeto ya tiene una fotografía. Si no seleccionás otra, se conservará.
+            </p>
           </div>
         </div>
 
@@ -412,6 +549,7 @@ async function enviarFormulario() {
           <RouterLink to="/catalogo" class="button button-secondary">
             Cancelar
           </RouterLink>
+
           <button
             class="button button-primary"
             type="submit"
@@ -454,7 +592,7 @@ async function enviarFormulario() {
           <span>
             {{ MODO_PRUEBA
               ? 'Los datos de prueba son temporales y se reinician al recargar la aplicación.'
-              : 'Los datos se guardan en la base de datos de BuscaTECH.' }}
+              : 'Los datos y las fotografías se guardan en Supabase.' }}
           </span>
         </div>
       </aside>

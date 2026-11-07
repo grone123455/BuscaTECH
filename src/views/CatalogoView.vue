@@ -16,6 +16,7 @@ const objetos = ref([])
 const categorias = ref(['Todas'])
 const categoriaSeleccionada = ref('Todas')
 const busqueda = ref('')
+const ordenSeleccionado = ref('asc')
 const cargando = ref(true)
 const error = ref('')
 
@@ -34,6 +35,14 @@ const objetosFiltrados = computed(() => {
       (objeto.sector || '').toLowerCase().includes(texto)
 
     return coincideCategoria && coincideBusqueda
+  })
+})
+
+const objetosOrdenados = computed(() => {
+  return [...objetosFiltrados.value].sort((a, b) => {
+    return ordenSeleccionado.value === 'asc'
+      ? a.nombre.localeCompare(b.nombre)
+      : b.nombre.localeCompare(a.nombre)
   })
 })
 
@@ -143,6 +152,15 @@ onMounted(cargarCatalogo)
       </div>
     </section>
 
+    <section class="catalog-sort">
+      <label for="orden-objetos">Ordenar por</label>
+
+      <select id="orden-objetos" v-model="ordenSeleccionado">
+        <option value="asc">Nombre: A a Z</option>
+        <option value="desc">Nombre: Z a A</option>
+      </select>
+    </section>
+
     <div class="catalog-results-bar">
       <span class="results-label">
         <span class="results-dot"></span>
@@ -150,8 +168,8 @@ onMounted(cargarCatalogo)
       </span>
 
       <span class="results-count">
-        {{ objetosFiltrados.length }}
-        {{ objetosFiltrados.length === 1 ? 'objeto' : 'objetos' }}
+        {{ objetosOrdenados.length }}
+        {{ objetosOrdenados.length === 1 ? 'objeto' : 'objetos' }}
       </span>
     </div>
 
@@ -169,13 +187,20 @@ onMounted(cargarCatalogo)
       :mensaje="error"
     />
 
-    <section v-else-if="objetosFiltrados.length" class="catalog-grid">
+    <section v-else-if="objetosOrdenados.length" class="catalog-grid">
       <article
-        v-for="objeto in objetosFiltrados"
+        v-for="objeto in objetosOrdenados"
         :key="objeto.id"
         class="catalog-card"
         @click="verObjeto(objeto.id)"
       >
+        <img
+          v-if="objeto.imagen_url"
+          :src="objeto.imagen_url"
+          :alt="`Fotografía de ${objeto.nombre}`"
+          class="catalog-card-image"
+        />
+
         <div class="catalog-card-content">
           <span class="catalog-card-category">
             {{ objeto.especialidad }}
