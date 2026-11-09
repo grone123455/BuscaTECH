@@ -1,4 +1,6 @@
+
 import { createRouter, createWebHistory } from 'vue-router'
+import { supabase } from '../services/supabase'
 
 const routes = [
   {
@@ -15,6 +17,7 @@ const routes = [
     path: '/objetos/nuevo',
     name: 'nuevo-objeto',
     component: () => import('../views/ObjetoFormView.vue'),
+    meta: { requiresAuth: true },
   },
   {
     path: '/objetos/:id',
@@ -25,6 +28,7 @@ const routes = [
     path: '/objetos/:id/editar',
     name: 'editar-objeto',
     component: () => import('../views/ObjetoFormView.vue'),
+    meta: { requiresAuth: true },
   },
   {
     path: '/login',
@@ -44,6 +48,19 @@ const router = createRouter({
   scrollBehavior() {
     return { top: 0 }
   },
+})
+
+router.beforeEach(async (to) => {
+  if (to.meta.requiresAuth) {
+    const { data: { session }, error } = await supabase.auth.getSession()
+
+    if (error || !session) {
+      return {
+        name: 'login',
+        query: { redirect: to.fullPath },
+      }
+    }
+  }
 })
 
 export default router

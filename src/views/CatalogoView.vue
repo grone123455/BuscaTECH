@@ -1,6 +1,6 @@
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { supabase } from '../services/supabase'
 import PageHeading from '../components/PageHeading.vue'
@@ -19,6 +19,9 @@ const busqueda = ref('')
 const ordenSeleccionado = ref('asc')
 const cargando = ref(true)
 const error = ref('')
+const usuarioAutenticado = ref(false)
+
+let suscripcionAuth = null
 
 const objetosFiltrados = computed(() => {
   return objetos.value.filter((objeto) => {
@@ -29,7 +32,7 @@ const objetosFiltrados = computed(() => {
     const texto = busqueda.value.toLowerCase().trim()
 
     const coincideBusqueda =
-      objeto.nombre.toLowerCase().includes(texto) ||
+      (objeto.nombre || '').toLowerCase().includes(texto) ||
       (objeto.descripcion || '').toLowerCase().includes(texto) ||
       (objeto.especialidad || '').toLowerCase().includes(texto) ||
       (objeto.sector || '').toLowerCase().includes(texto)
@@ -93,10 +96,29 @@ function verObjeto(id) {
 }
 
 function agregarObjeto() {
+  if (!usuarioAutenticado.value) return
+
   router.push('/objetos/nuevo')
 }
 
-onMounted(cargarCatalogo)
+onMounted(async () => {
+  await cargarCatalogo()
+
+  const { data } = await supabase.auth.getSession()
+  usuarioAutenticado.value = Boolean(data.session)
+
+  const { data: authData } = supabase.auth.onAuthStateChange(
+    (_event, session) => {
+      usuarioAutenticado.value = Boolean(session)
+    }
+  )
+
+  suscripcionAuth = authData.subscription
+})
+
+onUnmounted(() => {
+  suscripcionAuth?.unsubscribe()
+})
 </script>
 
 <template>
@@ -130,7 +152,11 @@ onMounted(cargarCatalogo)
         />
       </div>
 
-      <button class="button button-primary catalog-add" @click="agregarObjeto">
+      <button
+        v-if="usuarioAutenticado"
+        class="button button-primary catalog-add"
+        @click="agregarObjeto"
+      >
         <span>+</span>
         Agregar objeto
       </button>
@@ -237,7 +263,11 @@ onMounted(cargarCatalogo)
         No se encontraron objetos con los filtros seleccionados.
       </p>
 
-      <button class="text-button" @click="agregarObjeto">
+      <button
+        v-if="usuarioAutenticado"
+        class="text-button"
+        @click="agregarObjeto"
+      >
         Agregar el primer objeto
       </button>
     </section>
